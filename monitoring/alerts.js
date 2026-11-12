@@ -4,18 +4,24 @@
 //   ctx    : { t, minuteOfDay, slo, expectedRequests }   (이 시각의 평소 요청 수 = ops.expected(minuteOfDay))
 //   반환   : true/false  (또는 { fire: true, reason })
 // 평가: node scripts/eval.js alerts   (공개 시나리오 5개)
-const ops = require("../lib/ops");
-
 module.exports = {
   rules: [
-    // 예시 규칙 — 일부러 둔하게 만들어 두었다. 이 규칙을 참고해 형식을 익히고, 다듬거나 지우고 새로 만든다.
     {
-      id: "example-latency",
+      id: "deploy-error-spike",
       severity: "page",
-      runbook: "RB-EXAMPLE",
-      evaluate: (window) => ops.allLast(window, 5, (s) => s.p95Ms > 2000), // 5분 연속 p95 > 2초
+      runbook: "RB-ERR-01",
+      evaluate: (window) => {
+        const consecutiveMinutes = 4; // 4분 연속이면 공개 기준의 5분 감지 목표 안에 든다.
+        const minRequestsPerMinute = 100; // 평소 최저 약 480건/분, 새벽 40% 수준도 약 192건/분이므로 저표본을 거른다.
+        const errorRateThreshold = 0.01; // 1%는 평소 약 0.4%의 2.5배이며 availability SLO 오류 한도 0.5%의 2배다.
+        const recent = window.slice(-consecutiveMinutes);
+
+        return recent.length === consecutiveMinutes && recent.every(
+          (sample) =>
+            sample.requests >= minRequestsPerMinute &&
+            sample.errors / sample.requests > errorRateThreshold
+        );
+      },
     },
-    // TODO: 오류율(급등 / 느린 소진), 지연, 트래픽 급감, 결제 실패율, 추천 품질 …
-    //       "한 번 튄 값"이 아니라 "계속되는가"(지속성)와 "평소와 얼마나 다른가"(상대 비교)를 생각한다.
   ],
 };
