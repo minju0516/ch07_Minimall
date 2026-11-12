@@ -42,5 +42,47 @@ module.exports = {
         );
       },
     },
+    {
+      id: "persistent-error-rate",
+      severity: "ticket",
+      runbook: "RB-ERR-03",
+      evaluate: (window) => {
+        const observationMinutes = 15; // 15분 동안 반복되는 오류를 봐 짧은 급증과 구분한다.
+        const requiredMinutes = 10; // 15분 중 10분을 요구해 평소 약 0.4%의 흔들림과 SLO 0.5% 경계 부근의 간헐값을 거른다.
+        const minRequestsPerMinute = 100; // 평소 최저 약 480건/분, 새벽 40% 수준도 약 192건/분이므로 저표본은 판단하지 않는다.
+        const errorRateThreshold = 0.01; // 1%는 평소 약 0.4%의 2.5배이며 SLO 오류 한도 0.5%의 2배다.
+        const pageConsecutiveMinutes = 4; // RB-ERR-01의 4분 연속 page 조건과 동일하게 중복 여부를 판정한다.
+        const recent = window.slice(-observationMinutes);
+
+        if (
+          recent.length !== observationMinutes ||
+          recent.some((sample) => sample.requests < minRequestsPerMinute)
+        ) {
+          return false;
+        }
+
+        const pageAlreadyFired = recent.some((_, startIndex) => {
+          const pageWindow = recent.slice(
+            startIndex,
+            startIndex + pageConsecutiveMinutes
+          );
+          return (
+            pageWindow.length === pageConsecutiveMinutes &&
+            pageWindow.every(
+              (sample) =>
+                sample.requests >= minRequestsPerMinute &&
+                sample.errors / sample.requests > errorRateThreshold
+            )
+          );
+        });
+
+        return (
+          !pageAlreadyFired &&
+          recent.filter(
+            (sample) => sample.errors / sample.requests > errorRateThreshold
+          ).length >= requiredMinutes
+        );
+      },
+    },
   ],
 };
