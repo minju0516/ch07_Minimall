@@ -84,5 +84,22 @@ module.exports = {
         );
       },
     },
+    {
+      id: "slo-latency-breach",
+      severity: "page",
+      runbook: "RB-LAT-01",
+      evaluate: (window, ctx) => {
+        const observationMinutes = 8; // 8분 창에서 일시 변동이 아닌 지속 초과를 판단한다.
+        const requiredMinutes = 5; // 8분 중 5분 초과를 요구해 한두 번의 튐을 거른다.
+        const p95ThresholdMs = ctx.slo.p95Ms; // config/slo.json의 p95Ms 800ms SLO를 그대로 사용한다.
+        const recent = window.slice(-observationMinutes);
+
+        return (
+          recent.length === observationMinutes &&
+          recent.filter((sample) => sample.p95Ms > p95ThresholdMs).length >=
+            requiredMinutes
+        );
+      },
+    },
   ],
 };
