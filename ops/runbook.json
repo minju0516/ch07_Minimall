@@ -14,5 +14,13 @@
     "mitigation": [{ "action": "rollback", "command": "M5에서 실행 절차 작성" }],
     "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
     "verify": ["오류율이 availability SLO 범위로 회복됐는지 확인"]
+  },
+  "RB-ERR-02": {
+    "title": "짧은 오류 급증",
+    "owner": "서비스 온콜",
+    "firstFiveMinutes": ["오류율과 요청 표본 수 확인", "급증이 지속 중인지 최근 분 단위 추이 확인"],
+    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
+    "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
+    "verify": ["오류율이 평소 및 availability SLO 범위로 회복됐는지 확인"]
   }
 }

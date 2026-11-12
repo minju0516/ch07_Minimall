@@ -23,5 +23,24 @@ module.exports = {
         );
       },
     },
+    {
+      id: "brief-error-spike",
+      severity: "ticket",
+      runbook: "RB-ERR-02",
+      evaluate: (window) => {
+        const observationMinutes = 3; // 3분 관찰로 같은 길이의 공개 일시 급증을 놓치지 않는다.
+        const requiredMinutes = 2; // 3분 중 2분을 요구해 한 번의 튐만으로 티켓을 만들지 않는다.
+        const minRequestsPerMinute = 100; // 평소 최저 약 480건/분, 새벽 40% 수준도 약 192건/분이므로 저표본을 거른다.
+        const errorRateThreshold = 0.01; // 1%는 평소 약 0.4%의 2.5배이며 availability SLO 오류 한도 0.5%의 2배다.
+        const recent = window.slice(-observationMinutes);
+
+        return (
+          recent.length === observationMinutes &&
+          recent.every((sample) => sample.requests >= minRequestsPerMinute) &&
+          recent.filter((sample) => sample.errors / sample.requests > errorRateThreshold).length >=
+            requiredMinutes
+        );
+      },
+    },
   ],
 };
