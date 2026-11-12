@@ -230,5 +230,36 @@ module.exports = {
         return totalPaymentFails / totalPaymentAttempts > failureRateThreshold;
       },
     },
+    {
+      id: "recommendation-quality-drop",
+      severity: "ticket",
+      runbook: "RB-REC-01",
+      evaluate: (window, ctx) => {
+        const observationMinutes = 15; // 최근 15분 창은 지속 저하를 보려는 제안값이며 계약서에 정해진 값은 아니다.
+        const minimumImpressions = 1000; // 1,000회는 클릭률 비율을 판단하기 위한 제안 표본 하한이다.
+        const baselineFraction = 0.75; // 75%는 제안값이며, ctx.slo.recCtrBaseline 8%의 75%인 6%를 기준으로 삼는다.
+        const recent = window.slice(-observationMinutes);
+
+        if (recent.length !== observationMinutes) {
+          return false;
+        }
+
+        const totalImpressions = recent.reduce(
+          (total, sample) => total + sample.recImpr,
+          0
+        );
+        if (!totalImpressions || totalImpressions < minimumImpressions) {
+          return false;
+        }
+
+        const totalClicks = recent.reduce(
+          (total, sample) => total + sample.recClicks,
+          0
+        );
+        const ctrThreshold = ctx.slo.recCtrBaseline * baselineFraction; // 8% × 75% = 제안 임계값 6%.
+
+        return totalClicks / totalImpressions < ctrThreshold;
+      },
+    },
   ],
 };

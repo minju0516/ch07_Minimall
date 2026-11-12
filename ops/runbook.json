@@ -62,5 +62,13 @@
     "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
     "escalation": { "after": "M5에서 확정", "to": "결제 서비스 담당자" },
     "verify": ["합산 결제 실패율이 paymentFailMax SLO 이하로 회복됐는지 확인"]
+  },
+  "RB-REC-01": {
+    "title": "추천 품질 저하",
+    "owner": "추천 서비스 담당자",
+    "firstFiveMinutes": ["최근 15분 recClicks와 recImpr 합계 및 CTR 확인", "추천 서비스의 최근 데이터·설정 변경 확인"],
+    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
+    "escalation": { "after": "M5에서 확정", "to": "추천 서비스 담당자" },
+    "verify": ["합산 추천 CTR이 recCtrBaseline 대비 정상 범위로 회복됐는지 확인"]
   }
 }
