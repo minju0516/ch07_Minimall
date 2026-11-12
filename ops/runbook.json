@@ -46,5 +46,13 @@
     "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
     "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
     "verify": ["p95가 오래된 기준 구간 대비 안정 범위로 회복됐는지 확인"]
+  },
+  "RB-TRAFFIC-01": {
+    "title": "평소 대비 요청량 급감",
+    "owner": "서비스 온콜",
+    "firstFiveMinutes": ["실제 요청량과 시간대별 기대 요청량 비교", "감소가 지속되는지 최근 분 단위 추이 확인"],
+    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
+    "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
+    "verify": ["요청량이 해당 시간대의 기대 범위로 회복됐는지 확인"]
   }
 }

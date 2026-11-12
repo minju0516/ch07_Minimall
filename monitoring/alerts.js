@@ -143,5 +143,23 @@ module.exports = {
         );
       },
     },
+    {
+      id: "traffic-drop",
+      severity: "page",
+      runbook: "RB-TRAFFIC-01",
+      evaluate: (window, ctx) => {
+        const observationMinutes = 7; // 승인된 최근 7분 창에서 지속적인 감소를 확인한다.
+        const requiredMinutes = 5; // 5/7은 단기 하락을 걸러내기 위한 제안값이며 계약서에 정해진 값은 아니다.
+        const expectedFraction = 0.5; // 50% 미만은 제안값이며, 시간대별 ctx.expectedRequests 대비 비율로 비교한다.
+        const recent = window.slice(-observationMinutes);
+
+        return (
+            recent.length === observationMinutes &&
+            recent.filter(
+              (sample) => sample.requests < ctx.expectedRequests * expectedFraction
+            ).length >= requiredMinutes
+        );
+      },
+    },
   ],
 };
