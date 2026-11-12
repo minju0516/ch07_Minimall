@@ -38,5 +38,13 @@
     "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
     "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
     "verify": ["p95가 SLO 800ms 이하로 회복됐는지 확인"]
+  },
+  "RB-LAT-02": {
+    "title": "평소 대비 응답 지연 상승",
+    "owner": "서비스 온콜",
+    "firstFiveMinutes": ["최근 p95와 60~120분 전 기준 중앙값 비교", "상대 상승이 지속되는지 분 단위 추이 확인"],
+    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
+    "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
+    "verify": ["p95가 오래된 기준 구간 대비 안정 범위로 회복됐는지 확인"]
   }
 }

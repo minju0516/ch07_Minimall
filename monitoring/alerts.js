@@ -101,5 +101,47 @@ module.exports = {
         );
       },
     },
+    {
+      id: "relative-latency-rise",
+      severity: "ticket",
+      runbook: "RB-LAT-02",
+      evaluate: (window) => {
+        const maxWindowMinutes = 120; // OPS_CONTRACT가 허용하는 최대 120분 표본으로 오래된 기준 구간을 확보한다.
+        const baselineMinutes = 60; // 창의 오래된 60분(현재 기준 60~120분 전)을 평소 기준으로 삼는다.
+        const observationMinutes = 15; // 승인된 최근 15분 관찰 창으로 지속 상승을 확인한다.
+        const requiredMinutes = 10; // 최근 15분 중 10분을 요구해 단발 상승만으로 티켓을 만들지 않는다.
+        const riseFactor = 1.5; // 계약서에 정해진 값이 아닌 제안값이며, 기준 중앙값보다 50% 이상 상승한 경우를 의미한다.
+        const history = window.slice(-maxWindowMinutes);
+
+        if (history.length !== maxWindowMinutes) {
+            return false;
+        }
+
+        const baselineValues = history
+            .slice(0, baselineMinutes)
+            .map((sample) => sample.p95Ms)
+            .filter(Number.isFinite)
+            .sort((left, right) => left - right);
+        const recent = history.slice(-observationMinutes);
+
+        if (
+            baselineValues.length !== baselineMinutes ||
+            recent.length !== observationMinutes ||
+            recent.some((sample) => !Number.isFinite(sample.p95Ms))
+        ) {
+            return false;
+        }
+
+        const middleIndex = baselineValues.length / 2; // 짝수인 60개 기준 표본의 중앙 두 값 위치다.
+        const baselineMedian =
+            (baselineValues[middleIndex - 1] + baselineValues[middleIndex]) / 2; // 중앙 두 값의 평균으로 중앙값을 구한다.
+
+        return (
+            recent.filter(
+              (sample) => sample.p95Ms >= baselineMedian * riseFactor
+            ).length >= requiredMinutes
+        );
+      },
+    },
   ],
 };
