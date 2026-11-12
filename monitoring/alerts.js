@@ -107,13 +107,14 @@ module.exports = {
       runbook: "RB-LAT-02",
       evaluate: (window) => {
         const maxWindowMinutes = 120; // OPS_CONTRACT가 허용하는 최대 120분 표본으로 오래된 기준 구간을 확보한다.
-        const baselineMinutes = 60; // 창의 오래된 60분(현재 기준 60~120분 전)을 평소 기준으로 삼는다.
+        const minimumHistoryMinutes = 60; // 60분은 제안 최소 이력이며, INC 번들 재생에서 120분 요구로 장애 시점에 판단이 보류되어 완화한다.
+        const baselineMinutes = 30; // 30분은 제안 기준 구간 길이이며, window의 가장 오래된 30개 분을 쓴다.
         const observationMinutes = 15; // 승인된 최근 15분 관찰 창으로 지속 상승을 확인한다.
         const requiredMinutes = 10; // 최근 15분 중 10분을 요구해 단발 상승만으로 티켓을 만들지 않는다.
         const riseFactor = 1.5; // 계약서에 정해진 값이 아닌 제안값이며, 기준 중앙값보다 50% 이상 상승한 경우를 의미한다.
         const history = window.slice(-maxWindowMinutes);
 
-        if (history.length !== maxWindowMinutes) {
+        if (history.length < minimumHistoryMinutes) {
             return false;
         }
 
@@ -132,7 +133,7 @@ module.exports = {
             return false;
         }
 
-        const middleIndex = baselineValues.length / 2; // 짝수인 60개 기준 표본의 중앙 두 값 위치다.
+        const middleIndex = baselineValues.length / 2; // 짝수인 30개 기준 표본의 중앙 두 값 위치다.
         const baselineMedian =
             (baselineValues[middleIndex - 1] + baselineValues[middleIndex]) / 2; // 중앙 두 값의 평균으로 중앙값을 구한다.
 
