@@ -161,5 +161,74 @@ module.exports = {
         );
       },
     },
+    {
+      id: "payment-failure-rate",
+      severity: "page",
+      runbook: "RB-PAY-01",
+      evaluate: (window, ctx) => {
+        const minimumWindowMinutes = 10; // 최초 10분은 제안된 시작 창이며, 짧은 지연으로 실패율을 확인하기 위한 값이다.
+        const requiredPaymentAttempts = 400; // 400회는 제안 표본 하한(5% 부근 비율의 근사 95% 오차폭 약 2.1%p)이며 계약서 고정값은 아니다.
+        const maximumWindowMinutes = 120; // OPS_CONTRACT가 허용하는 최대 120분 표본 창이다.
+        const failureRateThreshold = ctx.slo.paymentFailMax; // config/slo.json의 paymentFailMax 0.05(5%) SLO를 사용한다.
+        const persistenceMinutes = 5; // 최근 5분 조건은 3분짜리 일시 이상에 page하지 않기 위한 제안값이다.
+        const requiredPersistenceMinutes = 4; // 5분 중 4분 조건은 제안값으로, 순간 초과를 걸러낸다.
+        const minAttemptsPerMinute = 20; // 분당 20회 미만은 비율 표본 부족으로 간주하는 제안값이다.
+        const available = window.slice(-maximumWindowMinutes);
+        const recentMinutes = window.slice(-persistenceMinutes);
+
+        if (recentMinutes.length !== persistenceMinutes) {
+            return false;
+        }
+
+        const persistentPerMinuteBreach =
+            recentMinutes.filter(
+              (sample) =>
+                sample.paymentAttempts >= minAttemptsPerMinute &&
+                sample.paymentFails / sample.paymentAttempts > failureRateThreshold
+            ).length >= requiredPersistenceMinutes;
+
+        if (!persistentPerMinuteBreach) {
+            return false;
+        }
+
+        if (available.length < minimumWindowMinutes) {
+            return false;
+        }
+
+        let selectedWindowMinutes = minimumWindowMinutes;
+        let selectedWindow = available.slice(-selectedWindowMinutes);
+        let totalPaymentAttempts = selectedWindow.reduce(
+            (total, sample) => total + sample.paymentAttempts,
+            0
+        );
+
+        while (
+            totalPaymentAttempts < requiredPaymentAttempts &&
+            selectedWindowMinutes < maximumWindowMinutes &&
+            selectedWindowMinutes < available.length
+        ) {
+            selectedWindowMinutes += 1;
+            selectedWindow = available.slice(-selectedWindowMinutes);
+            totalPaymentAttempts = selectedWindow.reduce(
+              (total, sample) => total + sample.paymentAttempts,
+              0
+            );
+        }
+
+        if (
+            !totalPaymentAttempts ||
+            totalPaymentAttempts < requiredPaymentAttempts
+        ) {
+            return false;
+        }
+
+        const totalPaymentFails = selectedWindow.reduce(
+            (total, sample) => total + sample.paymentFails,
+            0
+        );
+
+        return totalPaymentFails / totalPaymentAttempts > failureRateThreshold;
+      },
+    },
   ],
 };

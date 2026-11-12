@@ -54,5 +54,13 @@
     "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
     "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
     "verify": ["요청량이 해당 시간대의 기대 범위로 회복됐는지 확인"]
+  },
+  "RB-PAY-01": {
+    "title": "결제 실패율 상승",
+    "owner": "결제 서비스 온콜",
+    "firstFiveMinutes": ["paymentAttempts와 paymentFails 합계 및 실패율 확인", "같은 구간의 결제 서비스 상태와 최근 변경 확인"],
+    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
+    "escalation": { "after": "M5에서 확정", "to": "결제 서비스 담당자" },
+    "verify": ["합산 결제 실패율이 paymentFailMax SLO 이하로 회복됐는지 확인"]
   }
 }
