@@ -12,8 +12,9 @@ const ROLLBACK_WINDOW_MINUTES = 6;
 const REQUIRED_BAD_MINUTES = 5;
 // 승인 표의 제안값: 분별 오류율은 canary 오류가 최소 1건인 분만 증거로 센다.
 const MIN_ERRORS_PER_BAD_MINUTE = 1;
-// 승인 표의 제안값: 최근 5분 합산도 오류 5건 이상이고 baseline보다 2%p 초과 나빠야 한다.
+// 제안값: baseline 결제·추천 정상 판정에도 기존 최근 5분 합산 창을 재사용한다.
 const AGGREGATE_WINDOW_MINUTES = 5;
+// 승인 표의 제안값: 최근 5분 합산 오류도 5건 이상이고 baseline보다 2%p 초과 나빠야 한다.
 const MIN_AGGREGATE_ERRORS = 5;
 const ROLLBACK_ERROR_RATE_DELTA = 0.02;
 // 승인 표의 제안 하한: canary의 최근 5분 요청 표본, 단계별 5% / 25% / 50%.
@@ -40,12 +41,14 @@ const PAYMENT_PROMOTION_RATE_DELTA = 0.05;
 // 제안값: 결제 롤백은 해당 시점까지 단계 누적 canary 시도가 20건 이상일 때만 판단한다.
 const MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_ROLLBACK = 20;
 const PAYMENT_ROLLBACK_WINDOW_MINUTES = 3;
-// 기존 승격 표본 하한의 제안값: 단계 누적 canary 시도 20건.
+// 제안값: 단계 누적 canary 및 최근 5분 baseline 결제 시도 하한 20건.
 const MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_PROMOTION = 20;
+// 승인된 보조 제안값: 최근 2분 baseline 결제 실패율도 SLO와 비교하되, 기존 20건 하한을 재사용한다.
+const PAYMENT_BASELINE_EARLY_WINDOW_MINUTES = 2;
 // 근거: 팀이 승인한 롤아웃 판단표에 따라 단계 시작 후 20분까지 표본 미달이면 결제 지표를 제외한다.
 // 단계별 30분 hold 제한보다 10분 앞서 판단해 자동 롤백 직전까지 기다리지 않는다.
 const PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES = 20;
-// 승인 표의 제안 표본 하한: 추천은 recImpr 분모로 단계 누적 노출 400건부터 판단한다.
+// 제안값: 단계 누적 canary 및 최근 5분 baseline 추천 노출 하한 400건(recImpr 분모).
 const MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS = 400;
 // 승인 표의 제안값: 누적 CTR 저하가 3분 연속일 때만 추천 롤백 증거로 본다.
 const RECOMMENDATION_ROLLBACK_WINDOW_MINUTES = 3;
@@ -145,7 +148,7 @@ function decide(ctx) {
     recommendationBaselineValid &&
     canary.every(isValidRecommendationSample) &&
     baseline.every(isValidRecommendationSample);
-  const minimumRecommendationRollbackCtr =
+  const minimumRecommendationCtr =
     hasRecommendationBaseline && recommendationBaselineValid
     ? ctx.slo.recCtrBaseline * RECOMMENDATION_LOW_CTR_BASELINE_MULTIPLIER
     : FALLBACK_MIN_RECOMMENDATION_CTR;
@@ -161,6 +164,22 @@ function decide(ctx) {
     : " 알 수 없는 trafficPct여서 가장 큰 요청 하한을 적용했습니다.";
   const recentCanary = ops.last(canary, AGGREGATE_WINDOW_MINUTES);
   const recentBaseline = ops.last(baseline, AGGREGATE_WINDOW_MINUTES);
+  const recentBaselinePaymentEarly = ops.last(
+    baseline,
+    PAYMENT_BASELINE_EARLY_WINDOW_MINUTES,
+  );
+  const recentBaselinePaymentEarlyAttempts = ops.sum(
+    recentBaselinePaymentEarly,
+    "paymentAttempts",
+  );
+  const recentBaselinePaymentAttempts = ops.sum(
+    recentBaseline,
+    "paymentAttempts",
+  );
+  const recentBaselineRecommendationImpressions = ops.sum(
+    recentBaseline,
+    "recImpr",
+  );
   const recentBaselineRate = ops.ratio(recentBaseline, "errors", "requests");
   const baselineStageRate = ops.ratio(baseline, "errors", "requests");
   const canaryStageRate = ops.ratio(canary, "errors", "requests");
@@ -236,6 +255,9 @@ function decide(ctx) {
   let paymentRollbackEvidence = false;
   let paymentPromotionReady = false;
   let paymentPromotionWaived = false;
+  let paymentPromotionBaselineReady = false;
+  let paymentPromotionBaselineWaived = false;
+  let paymentPromotionBaselineEarlyBlock = false;
   let badCumulativeRecommendationMinutes = 0;
   if (recommendationInputsValid) {
     for (
@@ -263,7 +285,7 @@ function decide(ctx) {
       if (
         canaryCumulativeCtr <
           baselineCumulativeCtr * RECOMMENDATION_ROLLBACK_BASELINE_MULTIPLIER &&
-        canaryCumulativeCtr < minimumRecommendationRollbackCtr
+        canaryCumulativeCtr < minimumRecommendationCtr
       ) {
         badCumulativeRecommendationMinutes++;
       }
@@ -286,6 +308,18 @@ function decide(ctx) {
     ctx.minuteInStep >= RECOMMENDATION_PROMOTION_SAMPLE_WAIVER_MINUTES &&
     canaryCumulativeRecommendationImpressions <
       MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS;
+  const recommendationPromotionBaselineWaived =
+    recommendationInputsValid &&
+    paymentPromotionTimeValid &&
+    ctx.minuteInStep >= RECOMMENDATION_PROMOTION_SAMPLE_WAIVER_MINUTES &&
+    recentBaselineRecommendationImpressions <
+      MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS;
+  const recommendationPromotionBaselineReady =
+    recommendationInputsValid &&
+    recentBaselineRecommendationImpressions >=
+      MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS &&
+    ops.ratio(recentBaseline, "recClicks", "recImpr") >=
+      minimumRecommendationCtr;
   const recommendationPromotionReady =
     canaryCumulativeRecommendationImpressions >=
       MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS &&
@@ -328,6 +362,27 @@ function decide(ctx) {
 
     const canaryPaymentAttempts = ops.sum(canary, "paymentAttempts");
     const baselinePaymentAttempts = ops.sum(baseline, "paymentAttempts");
+    paymentPromotionBaselineWaived =
+      paymentSloValid &&
+      paymentPromotionTimeValid &&
+      ctx.minuteInStep >= PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES &&
+      recentBaselinePaymentAttempts <
+        MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_PROMOTION;
+    paymentPromotionBaselineReady =
+      paymentSloValid &&
+      recentBaselinePaymentAttempts >=
+        MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_PROMOTION &&
+      ops.ratio(recentBaseline, "paymentFails", "paymentAttempts") <=
+        paymentFailMax;
+    paymentPromotionBaselineEarlyBlock =
+      paymentSloValid &&
+      recentBaselinePaymentEarlyAttempts >=
+        MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_PROMOTION &&
+      ops.ratio(
+        recentBaselinePaymentEarly,
+        "paymentFails",
+        "paymentAttempts",
+      ) > paymentFailMax;
     paymentPromotionWaived =
       paymentPromotionTimeValid &&
       ctx.minuteInStep >= PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES &&
@@ -387,7 +442,11 @@ function decide(ctx) {
     median(baselineP95Values) <= ctx.slo.p95Ms &&
     paymentPromotionTimeValid &&
     (paymentPromotionReady || paymentPromotionWaived) &&
-    (recommendationPromotionReady || recommendationPromotionWaived)
+    (paymentPromotionBaselineReady || paymentPromotionBaselineWaived) &&
+    !paymentPromotionBaselineEarlyBlock &&
+    (recommendationPromotionReady || recommendationPromotionWaived) &&
+    (recommendationPromotionBaselineReady ||
+      recommendationPromotionBaselineWaived)
   ) {
     return {
       action: "promote",
@@ -397,10 +456,42 @@ function decide(ctx) {
           paymentPromotionWaived
             ? `단계 경과 ${PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES}분 이상이고 결제 시도가 20건 미만이라 결제 조건을 표본 부족으로 제외했습니다.`
             : "결제 승격 조건이 충족됐습니다.",
+          paymentPromotionBaselineWaived
+            ? `단계 경과 ${PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES}분 이상이고 최근 5분 baseline 결제 시도가 20건 미만이라 baseline 결제 정상 조건을 제외했습니다.`
+            : "최근 5분 baseline 결제 실패율이 SLO 이내입니다.",
           recommendationPromotionWaived
             ? `단계 경과 ${RECOMMENDATION_PROMOTION_SAMPLE_WAIVER_MINUTES}분 이상이고 추천 노출이 400건 미만이라 추천 조건을 표본 부족으로 제외했습니다.`
             : "추천 승격 조건이 충족됐습니다.",
+          recommendationPromotionBaselineWaived
+            ? `단계 경과 ${RECOMMENDATION_PROMOTION_SAMPLE_WAIVER_MINUTES}분 이상이고 최근 5분 baseline 추천 노출이 400건 미만이라 baseline 추천 정상 조건을 제외했습니다.`
+            : "최근 5분 baseline 추천 CTR이 정상 하한 이상입니다.",
         ].join(" ") + trafficPctNote,
+    };
+  }
+
+  const baselinePromotionBlocks = [];
+  if (paymentPromotionBaselineEarlyBlock) {
+    baselinePromotionBlocks.push(
+      "최근 2분 baseline 결제 실패율이 SLO를 초과해 승격을 보류합니다.",
+    );
+  }
+  if (!paymentPromotionBaselineReady && !paymentPromotionBaselineWaived) {
+    baselinePromotionBlocks.push(
+      "최근 5분 baseline 결제 실패율이 SLO를 초과했거나 표본 조건을 충족하지 않아 승격을 보류합니다.",
+    );
+  }
+  if (
+    !recommendationPromotionBaselineReady &&
+    !recommendationPromotionBaselineWaived
+  ) {
+    baselinePromotionBlocks.push(
+      "최근 5분 baseline 추천 CTR이 정상 하한 미만이거나 표본 조건을 충족하지 않아 승격을 보류합니다.",
+    );
+  }
+  if (baselinePromotionBlocks.length > 0) {
+    return {
+      action: "hold",
+      reason: baselinePromotionBlocks.join(" ") + trafficPctNote,
     };
   }
 
