@@ -33,6 +33,15 @@ const P95_ROLLBACK_MULTIPLIER = 1.5;
 // 승인 표의 제안값: 승격 때 canary p95 중앙값은 baseline 중앙값의 1.2배 이내여야 한다.
 // 5% 단계는 분별 p95 잡음이 커서 분별 비교 대신 최근 6분의 중앙값을 비교한다.
 const P95_PROMOTION_MULTIPLIER = 1.2;
+// 기존 코드의 제안값: baseline 대비 10%p 차이. OPS_DESIGN 3절과 계약서에는 수치가 없어 근거를 확인할 수 없다.
+const PAYMENT_ROLLBACK_RATE_DELTA = 0.10;
+// 기존 코드의 제안값: 승격 때 baseline 대비 5%p까지 허용. OPS_DESIGN 3절과 계약서에는 수치가 없어 근거를 확인할 수 없다.
+const PAYMENT_PROMOTION_RATE_DELTA = 0.05;
+// 제안값: 결제 롤백은 해당 시점까지 단계 누적 canary 시도가 20건 이상일 때만 판단한다.
+const MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_ROLLBACK = 20;
+const PAYMENT_ROLLBACK_WINDOW_MINUTES = 3;
+// 기존 승격 표본 하한의 제안값: 단계 누적 canary 시도 20건.
+const MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_PROMOTION = 20;
 
 function contextIssue(ctx) {
   if (!ctx || !Array.isArray(ctx.canary) || !Array.isArray(ctx.baseline)) {
@@ -68,6 +77,16 @@ function contextIssue(ctx) {
     }
   }
   return null;
+}
+
+function isValidPaymentSample(sample) {
+  return (
+    Number.isInteger(sample.paymentAttempts) &&
+    Number.isInteger(sample.paymentFails) &&
+    sample.paymentAttempts >= 0 &&
+    sample.paymentFails >= 0 &&
+    sample.paymentFails <= sample.paymentAttempts
+  );
 }
 
 function isValidP95(value) {
@@ -165,16 +184,66 @@ function decide(ctx) {
     recentBaselineP95Minutes.length === ROLLBACK_WINDOW_MINUTES &&
     badP95MinuteCount >= REQUIRED_BAD_MINUTES;
 
+  const paymentSamplesValid =
+    canary.every(isValidPaymentSample) && baseline.every(isValidPaymentSample);
+  const paymentFailMax = ctx.slo && ctx.slo.paymentFailMax;
+  const paymentSloValid =
+    Number.isFinite(paymentFailMax) && paymentFailMax >= 0 && paymentFailMax <= 1;
+  let paymentRollbackEvidence = false;
+  let paymentPromotionReady = false;
+  if (paymentSamplesValid) {
+    let badCumulativePaymentMinutes = 0;
+
+    for (let i = Math.max(0, canary.length - PAYMENT_ROLLBACK_WINDOW_MINUTES); i < canary.length; i++) {
+      const canaryThroughMinute = canary.slice(0, i + 1);
+      const baselineThroughMinute = baseline.slice(0, i + 1);
+      const canaryCumulativeAttempts = ops.sum(canaryThroughMinute, "paymentAttempts");
+      const baselineCumulativeAttempts = ops.sum(baselineThroughMinute, "paymentAttempts");
+      if (
+        canaryCumulativeAttempts < MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_ROLLBACK ||
+        baselineCumulativeAttempts === 0
+      ) {
+        continue;
+      }
+
+      const canaryCumulativeRate = ops.ratio(canaryThroughMinute, "paymentFails", "paymentAttempts");
+      const baselineCumulativeRate = ops.ratio(baselineThroughMinute, "paymentFails", "paymentAttempts");
+      if (
+        paymentSloValid &&
+        canaryCumulativeRate > paymentFailMax &&
+        canaryCumulativeRate > baselineCumulativeRate + PAYMENT_ROLLBACK_RATE_DELTA
+      ) {
+        badCumulativePaymentMinutes++;
+      }
+    }
+
+    paymentRollbackEvidence =
+      paymentSloValid &&
+      canary.length >= PAYMENT_ROLLBACK_WINDOW_MINUTES &&
+      badCumulativePaymentMinutes === PAYMENT_ROLLBACK_WINDOW_MINUTES;
+
+    const canaryPaymentAttempts = ops.sum(canary, "paymentAttempts");
+    const baselinePaymentAttempts = ops.sum(baseline, "paymentAttempts");
+    paymentPromotionReady =
+      paymentSloValid &&
+      canaryPaymentAttempts >= MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_PROMOTION &&
+      baselinePaymentAttempts > 0 &&
+      ops.ratio(canary, "paymentFails", "paymentAttempts") <=
+        ops.ratio(baseline, "paymentFails", "paymentAttempts") +
+          PAYMENT_PROMOTION_RATE_DELTA;
+  }
+
   // External degradation does not suppress a sustained canary-only regression; baseline health gates promotion only.
   const baselineRecentIsHealthy =
     recentBaselineRequests > 0 && recentBaselineRate <= MAX_BASELINE_ERROR_RATE;
 
-  if (rollbackEvidence || latencyRollbackEvidence) {
+  if (rollbackEvidence || latencyRollbackEvidence || paymentRollbackEvidence) {
     return {
       action: "rollback",
       reason: [
         rollbackEvidence && "오류율이 같은 분 baseline보다 지속적으로 높고 합산 기준도 초과했습니다.",
         latencyRollbackEvidence && "같은 분 canary p95가 baseline보다 지속적으로 높습니다.",
+        paymentRollbackEvidence && "단계 누적 결제 실패율이 baseline보다 지속적으로 높습니다.",
       ]
         .filter(Boolean)
         .join(" ") + trafficPctNote,
@@ -200,19 +269,21 @@ function decide(ctx) {
     isValidP95(ctx.slo.p95Ms) &&
     median(canaryP95Values) <=
       median(baselineP95Values) * P95_PROMOTION_MULTIPLIER &&
-    median(baselineP95Values) <= ctx.slo.p95Ms
+    median(baselineP95Values) <= ctx.slo.p95Ms &&
+    paymentPromotionReady
   ) {
     return {
       action: "promote",
-      reason: "오류율·지연 표본과 관찰 조건이 충족됐고 baseline 대비 허용 범위 안입니다." +
-        trafficPctNote,
+      reason:
+      "오류율·지연·결제 표본과 관찰 조건이 충족됐고 baseline 대비 허용 범위 안입니다." +
+      trafficPctNote,
     };
   }
 
   return {
     action: "hold",
     reason:
-      "오류율 롤백 증거가 부족하거나 승격 표본·관찰 조건을 아직 충족하지 않았습니다." +
+      "롤백 증거가 부족하거나 오류율·지연·결제 승격 조건을 아직 충족하지 않았습니다." +
       trafficPctNote,
   };
 }
