@@ -42,6 +42,9 @@ const MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_ROLLBACK = 20;
 const PAYMENT_ROLLBACK_WINDOW_MINUTES = 3;
 // 기존 승격 표본 하한의 제안값: 단계 누적 canary 시도 20건.
 const MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_PROMOTION = 20;
+// 근거: 팀이 승인한 롤아웃 판단표에 따라 단계 시작 후 20분까지 표본 미달이면 결제 지표를 제외한다.
+// 단계별 30분 hold 제한보다 10분 앞서 판단해 자동 롤백 직전까지 기다리지 않는다.
+const PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES = 20;
 
 function contextIssue(ctx) {
   if (!ctx || !Array.isArray(ctx.canary) || !Array.isArray(ctx.baseline)) {
@@ -189,8 +192,11 @@ function decide(ctx) {
   const paymentFailMax = ctx.slo && ctx.slo.paymentFailMax;
   const paymentSloValid =
     Number.isFinite(paymentFailMax) && paymentFailMax >= 0 && paymentFailMax <= 1;
+  const paymentPromotionTimeValid =
+    Number.isFinite(ctx.minuteInStep) && ctx.minuteInStep >= 0;
   let paymentRollbackEvidence = false;
   let paymentPromotionReady = false;
+  let paymentPromotionWaived = false;
   if (paymentSamplesValid) {
     let badCumulativePaymentMinutes = 0;
 
@@ -224,6 +230,10 @@ function decide(ctx) {
 
     const canaryPaymentAttempts = ops.sum(canary, "paymentAttempts");
     const baselinePaymentAttempts = ops.sum(baseline, "paymentAttempts");
+    paymentPromotionWaived =
+      paymentPromotionTimeValid &&
+      ctx.minuteInStep >= PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES &&
+      canaryPaymentAttempts < MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_PROMOTION;
     paymentPromotionReady =
       paymentSloValid &&
       canaryPaymentAttempts >= MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_PROMOTION &&
@@ -270,12 +280,15 @@ function decide(ctx) {
     median(canaryP95Values) <=
       median(baselineP95Values) * P95_PROMOTION_MULTIPLIER &&
     median(baselineP95Values) <= ctx.slo.p95Ms &&
-    paymentPromotionReady
+    paymentPromotionTimeValid &&
+    (paymentPromotionReady || paymentPromotionWaived)
   ) {
     return {
       action: "promote",
       reason:
-      "오류율·지연·결제 표본과 관찰 조건이 충족됐고 baseline 대비 허용 범위 안입니다." +
+      (paymentPromotionWaived
+        ? `오류율·지연 조건이 충족됐습니다. 단계 경과 ${PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES}분 이상이고 결제 시도가 20건 미만이라 표본 부족으로 결제 승격 조건을 면제했습니다.`
+        : "오류율·지연·결제 표본과 관찰 조건이 충족됐고 baseline 대비 허용 범위 안입니다.") +
       trafficPctNote,
     };
   }
