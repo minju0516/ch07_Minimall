@@ -45,6 +45,18 @@ const MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_PROMOTION = 20;
 // 근거: 팀이 승인한 롤아웃 판단표에 따라 단계 시작 후 20분까지 표본 미달이면 결제 지표를 제외한다.
 // 단계별 30분 hold 제한보다 10분 앞서 판단해 자동 롤백 직전까지 기다리지 않는다.
 const PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES = 20;
+// 승인 표의 제안 표본 하한: 추천은 recImpr 분모로 단계 누적 노출 400건부터 판단한다.
+const MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS = 400;
+// 승인 표의 제안값: 누적 CTR 저하가 3분 연속일 때만 추천 롤백 증거로 본다.
+const RECOMMENDATION_ROLLBACK_WINDOW_MINUTES = 3;
+const RECOMMENDATION_ROLLBACK_BASELINE_MULTIPLIER = 0.60;
+const RECOMMENDATION_PROMOTION_BASELINE_MULTIPLIER = 0.85;
+// 승인 표의 제안값: 단계 시작 20분 이후에도 추천 표본이 부족하면 추천 승격 조건을 제외한다.
+const RECOMMENDATION_PROMOTION_SAMPLE_WAIVER_MINUTES = 20;
+// 0.08 기준 CTR의 75%가 승인 표의 6% 하한이다.
+const RECOMMENDATION_LOW_CTR_BASELINE_MULTIPLIER = 0.75;
+// ctx.slo.recCtrBaseline이 없을 때 쓸 제안값이다.
+const FALLBACK_MIN_RECOMMENDATION_CTR = 0.06;
 
 function contextIssue(ctx) {
   if (!ctx || !Array.isArray(ctx.canary) || !Array.isArray(ctx.baseline)) {
@@ -67,6 +79,9 @@ function contextIssue(ctx) {
         sample.errors > sample.requests
       ) {
         return `${branch}의 ${i + 1}번째 표본 값이 올바르지 않아 판단을 보류합니다.`;
+      }
+      if (!isValidRecommendationSample(sample)) {
+        return `${branch}의 ${i + 1}번째 추천 노출·클릭 표본 값이 올바르지 않아 판단을 보류합니다.`;
       }
       if (sample.t !== undefined && !Number.isInteger(sample.t)) {
         return `${branch}의 ${i + 1}번째 표본 시각이 올바르지 않아 판단을 보류합니다.`;
@@ -92,6 +107,16 @@ function isValidPaymentSample(sample) {
   );
 }
 
+function isValidRecommendationSample(sample) {
+  return (
+    Number.isInteger(sample.recImpr) &&
+    Number.isInteger(sample.recClicks) &&
+    sample.recImpr >= 0 &&
+    sample.recClicks >= 0 &&
+    sample.recClicks <= sample.recImpr
+  );
+}
+
 function isValidP95(value) {
   // p95 응답 시간은 0보다 큰 유한한 밀리초 값이어야 유효 표본으로 쓴다.
   return Number.isFinite(value) && value > 0;
@@ -110,6 +135,23 @@ function decide(ctx) {
   if (issue) return { action: "hold", reason: issue };
 
   const { canary, baseline, trafficPct } = ctx;
+  const hasRecommendationBaseline =
+    ctx.slo &&
+    Object.prototype.hasOwnProperty.call(ctx.slo, "recCtrBaseline");
+  if (
+    hasRecommendationBaseline &&
+    (!Number.isFinite(ctx.slo.recCtrBaseline) ||
+      ctx.slo.recCtrBaseline < 0 ||
+      ctx.slo.recCtrBaseline > 1)
+  ) {
+    return {
+      action: "hold",
+      reason: "ctx.slo.recCtrBaseline 값이 올바르지 않아 판단을 보류합니다.",
+    };
+  }
+  const minimumRecommendationRollbackCtr = hasRecommendationBaseline
+    ? ctx.slo.recCtrBaseline * RECOMMENDATION_LOW_CTR_BASELINE_MULTIPLIER
+    : FALLBACK_MIN_RECOMMENDATION_CTR;
   const hasKnownTrafficPct = Object.prototype.hasOwnProperty.call(
     MIN_RECENT_REQUESTS_BY_TRAFFIC_PCT,
     trafficPct,
@@ -197,6 +239,56 @@ function decide(ctx) {
   let paymentRollbackEvidence = false;
   let paymentPromotionReady = false;
   let paymentPromotionWaived = false;
+  let badCumulativeRecommendationMinutes = 0;
+  for (
+    let i = Math.max(0, canary.length - RECOMMENDATION_ROLLBACK_WINDOW_MINUTES);
+    i < canary.length;
+    i++
+  ) {
+    const canaryThroughMinute = canary.slice(0, i + 1);
+    const baselineThroughMinute = baseline.slice(0, i + 1);
+    const canaryCumulativeImpressions = ops.sum(canaryThroughMinute, "recImpr");
+    const baselineCumulativeImpressions = ops.sum(baselineThroughMinute, "recImpr");
+    if (
+      canaryCumulativeImpressions < MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS ||
+      baselineCumulativeImpressions === 0
+    ) {
+      continue;
+    }
+
+    const canaryCumulativeCtr = ops.ratio(canaryThroughMinute, "recClicks", "recImpr");
+    const baselineCumulativeCtr = ops.ratio(
+      baselineThroughMinute,
+      "recClicks",
+      "recImpr",
+    );
+    if (
+      canaryCumulativeCtr <
+        baselineCumulativeCtr * RECOMMENDATION_ROLLBACK_BASELINE_MULTIPLIER &&
+      canaryCumulativeCtr < minimumRecommendationRollbackCtr
+    ) {
+      badCumulativeRecommendationMinutes++;
+    }
+  }
+  const recommendationRollbackEvidence =
+    canary.length >= RECOMMENDATION_ROLLBACK_WINDOW_MINUTES &&
+    badCumulativeRecommendationMinutes === RECOMMENDATION_ROLLBACK_WINDOW_MINUTES;
+
+  const canaryCumulativeRecommendationImpressions = ops.sum(canary, "recImpr");
+  const baselineCumulativeRecommendationImpressions = ops.sum(baseline, "recImpr");
+  const recommendationPromotionWaived =
+    paymentPromotionTimeValid &&
+    ctx.minuteInStep >= RECOMMENDATION_PROMOTION_SAMPLE_WAIVER_MINUTES &&
+    canaryCumulativeRecommendationImpressions <
+      MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS;
+  const recommendationPromotionReady =
+    canaryCumulativeRecommendationImpressions >=
+      MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS &&
+    baselineCumulativeRecommendationImpressions > 0 &&
+    ops.ratio(canary, "recClicks", "recImpr") >=
+      ops.ratio(baseline, "recClicks", "recImpr") *
+        RECOMMENDATION_PROMOTION_BASELINE_MULTIPLIER;
+
   if (paymentSamplesValid) {
     let badCumulativePaymentMinutes = 0;
 
@@ -247,13 +339,20 @@ function decide(ctx) {
   const baselineRecentIsHealthy =
     recentBaselineRequests > 0 && recentBaselineRate <= MAX_BASELINE_ERROR_RATE;
 
-  if (rollbackEvidence || latencyRollbackEvidence || paymentRollbackEvidence) {
+  if (
+    rollbackEvidence ||
+    latencyRollbackEvidence ||
+    paymentRollbackEvidence ||
+    recommendationRollbackEvidence
+  ) {
     return {
       action: "rollback",
       reason: [
         rollbackEvidence && "오류율이 같은 분 baseline보다 지속적으로 높고 합산 기준도 초과했습니다.",
         latencyRollbackEvidence && "같은 분 canary p95가 baseline보다 지속적으로 높습니다.",
         paymentRollbackEvidence && "단계 누적 결제 실패율이 baseline보다 지속적으로 높습니다.",
+        recommendationRollbackEvidence &&
+          "단계 누적 추천 CTR이 baseline의 60%와 절대 CTR 하한보다 3분 연속 낮습니다.",
       ]
         .filter(Boolean)
         .join(" ") + trafficPctNote,
@@ -281,22 +380,28 @@ function decide(ctx) {
       median(baselineP95Values) * P95_PROMOTION_MULTIPLIER &&
     median(baselineP95Values) <= ctx.slo.p95Ms &&
     paymentPromotionTimeValid &&
-    (paymentPromotionReady || paymentPromotionWaived)
+    (paymentPromotionReady || paymentPromotionWaived) &&
+    (recommendationPromotionReady || recommendationPromotionWaived)
   ) {
     return {
       action: "promote",
       reason:
-      (paymentPromotionWaived
-        ? `오류율·지연 조건이 충족됐습니다. 단계 경과 ${PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES}분 이상이고 결제 시도가 20건 미만이라 표본 부족으로 결제 승격 조건을 면제했습니다.`
-        : "오류율·지연·결제 표본과 관찰 조건이 충족됐고 baseline 대비 허용 범위 안입니다.") +
-      trafficPctNote,
+        [
+          "오류율·지연 조건이 충족됐습니다.",
+          paymentPromotionWaived
+            ? `단계 경과 ${PAYMENT_PROMOTION_SAMPLE_WAIVER_MINUTES}분 이상이고 결제 시도가 20건 미만이라 결제 조건을 표본 부족으로 제외했습니다.`
+            : "결제 승격 조건이 충족됐습니다.",
+          recommendationPromotionWaived
+            ? `단계 경과 ${RECOMMENDATION_PROMOTION_SAMPLE_WAIVER_MINUTES}분 이상이고 추천 노출이 400건 미만이라 추천 조건을 표본 부족으로 제외했습니다.`
+            : "추천 승격 조건이 충족됐습니다.",
+        ].join(" ") + trafficPctNote,
     };
   }
 
   return {
     action: "hold",
     reason:
-      "롤백 증거가 부족하거나 오류율·지연·결제 승격 조건을 아직 충족하지 않았습니다." +
+      "롤백 증거가 부족하거나 오류율·지연·결제·추천 승격 조건을 아직 충족하지 않았습니다." +
       trafficPctNote,
   };
 }
