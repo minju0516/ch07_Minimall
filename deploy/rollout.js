@@ -80,9 +80,6 @@ function contextIssue(ctx) {
       ) {
         return `${branch}의 ${i + 1}번째 표본 값이 올바르지 않아 판단을 보류합니다.`;
       }
-      if (!isValidRecommendationSample(sample)) {
-        return `${branch}의 ${i + 1}번째 추천 노출·클릭 표본 값이 올바르지 않아 판단을 보류합니다.`;
-      }
       if (sample.t !== undefined && !Number.isInteger(sample.t)) {
         return `${branch}의 ${i + 1}번째 표본 시각이 올바르지 않아 판단을 보류합니다.`;
       }
@@ -135,21 +132,21 @@ function decide(ctx) {
   if (issue) return { action: "hold", reason: issue };
 
   const { canary, baseline, trafficPct } = ctx;
-  const hasRecommendationBaseline =
+  const hasRecommendationBaseline = Boolean(
     ctx.slo &&
-    Object.prototype.hasOwnProperty.call(ctx.slo, "recCtrBaseline");
-  if (
-    hasRecommendationBaseline &&
-    (!Number.isFinite(ctx.slo.recCtrBaseline) ||
-      ctx.slo.recCtrBaseline < 0 ||
-      ctx.slo.recCtrBaseline > 1)
-  ) {
-    return {
-      action: "hold",
-      reason: "ctx.slo.recCtrBaseline 값이 올바르지 않아 판단을 보류합니다.",
-    };
-  }
-  const minimumRecommendationRollbackCtr = hasRecommendationBaseline
+    Object.prototype.hasOwnProperty.call(ctx.slo, "recCtrBaseline"),
+  );
+  const recommendationBaselineValid =
+    !hasRecommendationBaseline ||
+    (Number.isFinite(ctx.slo.recCtrBaseline) &&
+      ctx.slo.recCtrBaseline >= 0 &&
+      ctx.slo.recCtrBaseline <= 1);
+  const recommendationInputsValid =
+    recommendationBaselineValid &&
+    canary.every(isValidRecommendationSample) &&
+    baseline.every(isValidRecommendationSample);
+  const minimumRecommendationRollbackCtr =
+    hasRecommendationBaseline && recommendationBaselineValid
     ? ctx.slo.recCtrBaseline * RECOMMENDATION_LOW_CTR_BASELINE_MULTIPLIER
     : FALLBACK_MIN_RECOMMENDATION_CTR;
   const hasKnownTrafficPct = Object.prototype.hasOwnProperty.call(
@@ -240,43 +237,51 @@ function decide(ctx) {
   let paymentPromotionReady = false;
   let paymentPromotionWaived = false;
   let badCumulativeRecommendationMinutes = 0;
-  for (
-    let i = Math.max(0, canary.length - RECOMMENDATION_ROLLBACK_WINDOW_MINUTES);
-    i < canary.length;
-    i++
-  ) {
-    const canaryThroughMinute = canary.slice(0, i + 1);
-    const baselineThroughMinute = baseline.slice(0, i + 1);
-    const canaryCumulativeImpressions = ops.sum(canaryThroughMinute, "recImpr");
-    const baselineCumulativeImpressions = ops.sum(baselineThroughMinute, "recImpr");
-    if (
-      canaryCumulativeImpressions < MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS ||
-      baselineCumulativeImpressions === 0
+  if (recommendationInputsValid) {
+    for (
+      let i = Math.max(0, canary.length - RECOMMENDATION_ROLLBACK_WINDOW_MINUTES);
+      i < canary.length;
+      i++
     ) {
-      continue;
-    }
+      const canaryThroughMinute = canary.slice(0, i + 1);
+      const baselineThroughMinute = baseline.slice(0, i + 1);
+      const canaryCumulativeImpressions = ops.sum(canaryThroughMinute, "recImpr");
+      const baselineCumulativeImpressions = ops.sum(baselineThroughMinute, "recImpr");
+      if (
+        canaryCumulativeImpressions < MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS ||
+        baselineCumulativeImpressions === 0
+      ) {
+        continue;
+      }
 
-    const canaryCumulativeCtr = ops.ratio(canaryThroughMinute, "recClicks", "recImpr");
-    const baselineCumulativeCtr = ops.ratio(
-      baselineThroughMinute,
-      "recClicks",
-      "recImpr",
-    );
-    if (
-      canaryCumulativeCtr <
-        baselineCumulativeCtr * RECOMMENDATION_ROLLBACK_BASELINE_MULTIPLIER &&
-      canaryCumulativeCtr < minimumRecommendationRollbackCtr
-    ) {
-      badCumulativeRecommendationMinutes++;
+      const canaryCumulativeCtr = ops.ratio(canaryThroughMinute, "recClicks", "recImpr");
+      const baselineCumulativeCtr = ops.ratio(
+        baselineThroughMinute,
+        "recClicks",
+        "recImpr",
+      );
+      if (
+        canaryCumulativeCtr <
+          baselineCumulativeCtr * RECOMMENDATION_ROLLBACK_BASELINE_MULTIPLIER &&
+        canaryCumulativeCtr < minimumRecommendationRollbackCtr
+      ) {
+        badCumulativeRecommendationMinutes++;
+      }
     }
   }
   const recommendationRollbackEvidence =
+    recommendationInputsValid &&
     canary.length >= RECOMMENDATION_ROLLBACK_WINDOW_MINUTES &&
     badCumulativeRecommendationMinutes === RECOMMENDATION_ROLLBACK_WINDOW_MINUTES;
 
-  const canaryCumulativeRecommendationImpressions = ops.sum(canary, "recImpr");
-  const baselineCumulativeRecommendationImpressions = ops.sum(baseline, "recImpr");
+  const canaryCumulativeRecommendationImpressions = recommendationInputsValid
+    ? ops.sum(canary, "recImpr")
+    : 0;
+  const baselineCumulativeRecommendationImpressions = recommendationInputsValid
+    ? ops.sum(baseline, "recImpr")
+    : 0;
   const recommendationPromotionWaived =
+    recommendationInputsValid &&
     paymentPromotionTimeValid &&
     ctx.minuteInStep >= RECOMMENDATION_PROMOTION_SAMPLE_WAIVER_MINUTES &&
     canaryCumulativeRecommendationImpressions <
@@ -284,6 +289,7 @@ function decide(ctx) {
   const recommendationPromotionReady =
     canaryCumulativeRecommendationImpressions >=
       MIN_CUMULATIVE_RECOMMENDATION_IMPRESSIONS &&
+    recommendationInputsValid &&
     baselineCumulativeRecommendationImpressions > 0 &&
     ops.ratio(canary, "recClicks", "recImpr") >=
       ops.ratio(baseline, "recClicks", "recImpr") *
