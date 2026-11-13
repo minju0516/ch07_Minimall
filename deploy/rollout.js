@@ -34,9 +34,9 @@ const P95_ROLLBACK_MULTIPLIER = 1.5;
 // 승인 표의 제안값: 승격 때 canary p95 중앙값은 baseline 중앙값의 1.2배 이내여야 한다.
 // 5% 단계는 분별 p95 잡음이 커서 분별 비교 대신 최근 6분의 중앙값을 비교한다.
 const P95_PROMOTION_MULTIPLIER = 1.2;
-// 기존 코드의 제안값: baseline 대비 10%p 차이. OPS_DESIGN 3절과 계약서에는 수치가 없어 근거를 확인할 수 없다.
+// 제안값: 결제 롤백은 canary 누적 실패율이 baseline보다 10%p 초과 나쁠 때(OPS_DESIGN 3절).
 const PAYMENT_ROLLBACK_RATE_DELTA = 0.10;
-// 기존 코드의 제안값: 승격 때 baseline 대비 5%p까지 허용. OPS_DESIGN 3절과 계약서에는 수치가 없어 근거를 확인할 수 없다.
+// 제안값: 결제 승격은 canary 누적 실패율이 baseline+5%p 이내일 때(OPS_DESIGN 3절).
 const PAYMENT_PROMOTION_RATE_DELTA = 0.05;
 // 제안값: 결제 롤백은 해당 시점까지 단계 누적 canary 시도가 20건 이상일 때만 판단한다.
 const MIN_CUMULATIVE_PAYMENT_ATTEMPTS_FOR_ROLLBACK = 20;
