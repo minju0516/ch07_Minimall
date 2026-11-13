@@ -28,6 +28,11 @@ const PROMOTION_MIN_REQUESTS = 200;
 // 승인 표의 제안값: canary는 baseline보다 1%p 초과 나쁘지 않아야 하며 baseline 오류율은 1% 이하.
 const PROMOTION_ERROR_RATE_DELTA = 0.01;
 const MAX_BASELINE_ERROR_RATE = 0.01;
+// 승인 표의 제안값: 최근 6분 중 5분 이상에서 canary p95가 baseline의 1.5배를 초과해야 한다.
+const P95_ROLLBACK_MULTIPLIER = 1.5;
+// 승인 표의 제안값: 승격 때 canary p95 중앙값은 baseline 중앙값의 1.2배 이내여야 한다.
+// 5% 단계는 분별 p95 잡음이 커서 분별 비교 대신 최근 6분의 중앙값을 비교한다.
+const P95_PROMOTION_MULTIPLIER = 1.2;
 
 function contextIssue(ctx) {
   if (!ctx || !Array.isArray(ctx.canary) || !Array.isArray(ctx.baseline)) {
@@ -63,6 +68,19 @@ function contextIssue(ctx) {
     }
   }
   return null;
+}
+
+function isValidP95(value) {
+  // p95 응답 시간은 0보다 큰 유한한 밀리초 값이어야 유효 표본으로 쓴다.
+  return Number.isFinite(value) && value > 0;
+}
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
 }
 
 function decide(ctx) {
@@ -115,16 +133,51 @@ function decide(ctx) {
     recentCanaryRequests >= rollbackRequestFloor &&
     recentCanaryErrors >= MIN_AGGREGATE_ERRORS &&
     recentCanaryRate > recentBaselineAggregateRate + ROLLBACK_ERROR_RATE_DELTA;
-  // 두 갈래 모두 나쁜 외부 장애에서는 롤백하지 않고, 승격의 baseline 정상 검사에서 보류한다.
+
+  // 지연은 승인 표의 제안값대로 같은 분 p95를 최근 6분 중 5분 이상 비교한다.
+  const recentCanaryP95Minutes = ops.last(canary, ROLLBACK_WINDOW_MINUTES);
+  const recentBaselineP95Minutes = ops.last(baseline, ROLLBACK_WINDOW_MINUTES);
+  let validP95PairCount = 0;
+  let badP95MinuteCount = 0;
+  const canaryP95Values = [];
+  const baselineP95Values = [];
+  for (let i = 0; i < recentCanaryP95Minutes.length; i++) {
+    const canaryMinute = recentCanaryP95Minutes[i];
+    const baselineMinute = recentBaselineP95Minutes[i];
+    if (
+      canaryMinute.requests === 0 ||
+      baselineMinute.requests === 0 ||
+      !isValidP95(canaryMinute.p95Ms) ||
+      !isValidP95(baselineMinute.p95Ms)
+    ) {
+      continue;
+    }
+
+    validP95PairCount++;
+    canaryP95Values.push(canaryMinute.p95Ms);
+    baselineP95Values.push(baselineMinute.p95Ms);
+    if (canaryMinute.p95Ms > baselineMinute.p95Ms * P95_ROLLBACK_MULTIPLIER) {
+      badP95MinuteCount++;
+    }
+  }
+  const latencyRollbackEvidence =
+    recentCanaryP95Minutes.length === ROLLBACK_WINDOW_MINUTES &&
+    recentBaselineP95Minutes.length === ROLLBACK_WINDOW_MINUTES &&
+    badP95MinuteCount >= REQUIRED_BAD_MINUTES;
+
+  // External degradation does not suppress a sustained canary-only regression; baseline health gates promotion only.
   const baselineRecentIsHealthy =
     recentBaselineRequests > 0 && recentBaselineRate <= MAX_BASELINE_ERROR_RATE;
 
-  if (rollbackEvidence) {
+  if (rollbackEvidence || latencyRollbackEvidence) {
     return {
       action: "rollback",
-      reason:
-        "최근 오류율이 같은 분 baseline보다 지속적으로 높고 5분 합산 기준도 초과했습니다." +
-        trafficPctNote,
+      reason: [
+        rollbackEvidence && "오류율이 같은 분 baseline보다 지속적으로 높고 합산 기준도 초과했습니다.",
+        latencyRollbackEvidence && "같은 분 canary p95가 baseline보다 지속적으로 높습니다.",
+      ]
+        .filter(Boolean)
+        .join(" ") + trafficPctNote,
     };
   }
 
@@ -141,12 +194,17 @@ function decide(ctx) {
     canary.length >= PROMOTION_MINUTES &&
     canaryStageRequests >= PROMOTION_MIN_REQUESTS &&
     baselineStageRequests > 0 &&
-    canaryStageRate <= baselineStageRate + PROMOTION_ERROR_RATE_DELTA
+    canaryStageRate <= baselineStageRate + PROMOTION_ERROR_RATE_DELTA &&
+    validP95PairCount === ROLLBACK_WINDOW_MINUTES &&
+    ctx.slo &&
+    isValidP95(ctx.slo.p95Ms) &&
+    median(canaryP95Values) <=
+      median(baselineP95Values) * P95_PROMOTION_MULTIPLIER &&
+    median(baselineP95Values) <= ctx.slo.p95Ms
   ) {
     return {
       action: "promote",
-      reason:
-        "오류율 표본과 관찰 시간이 충족됐고 baseline 대비 허용 범위 안입니다." +
+      reason: "오류율·지연 표본과 관찰 조건이 충족됐고 baseline 대비 허용 범위 안입니다." +
         trafficPctNote,
     };
   }
