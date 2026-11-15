@@ -118,8 +118,67 @@ function detectDrift(history, ctx) {
 // state : { drift(detectDrift 결과), history, today, lastRetrainDay, reference }
 // 반환  : "retrain" | "fix_data" | "hold"
 function retrainDecision(state) {
-  // TODO
-  return "hold";
+  const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  if (!isRecord(state) || !isRecord(state.drift) || typeof state.drift.drift !== "boolean") {
+    return "hold";
+  }
+  if (!state.drift.drift) {
+    return "hold";
+  }
+  if (state.drift.kind === "data_quality") {
+    return "fix_data";
+  }
+  if (state.drift.kind !== "covariate") {
+    return "hold";
+  }
+
+  const history = state.history;
+  if (!Array.isArray(history) || history.length === 0) {
+    return "hold";
+  }
+  const latest = history[history.length - 1];
+  if (!isRecord(latest) || !Number.isFinite(latest.day)) {
+    return "hold";
+  }
+  let today = latest.day;
+  if (state.today !== undefined && state.today !== null) {
+    if (!Number.isFinite(state.today) || state.today !== latest.day) {
+      return "hold";
+    }
+    today = state.today;
+  }
+
+  if (state.lastRetrainDay !== undefined && state.lastRetrainDay !== null) {
+    if (!Number.isFinite(state.lastRetrainDay)) {
+      return "hold";
+    }
+    const daysSinceRetrain = today - state.lastRetrainDay;
+    if (daysSinceRetrain < 0) {
+      return "hold";
+    }
+    if (daysSinceRetrain <= 7) {
+      return "hold";
+    }
+  }
+
+  if (history.length < 3) {
+    return "hold";
+  }
+  for (const day of history.slice(-3)) {
+    if (
+      !isRecord(day) ||
+      !Number.isFinite(day.volume) ||
+      !Number.isFinite(day.nullRate) ||
+      !Array.isArray(day.priceBins) ||
+      !Number.isFinite(day.priceBins[0])
+    ) {
+      return "hold";
+    }
+    if (day.volume < 1000 || day.nullRate >= 0.05 || day.priceBins[0] >= 0.2) {
+      return "hold";
+    }
+  }
+  return "retrain";
 }
 
 // candidate / champion : 모델 평가 요약(OPS_CONTRACT 5.3).  반환: { promote: boolean, code, reason }
