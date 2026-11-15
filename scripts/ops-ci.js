@@ -7,7 +7,7 @@ const { check } = require("./check_runbook");
 
 // TODO: 기준값(0~1)을 정하고, 그 근거를 docs/OPS_REPORT.md 에 적는다.
 //       (AI 가 만든 산출물 ai_ops/ 가 이 게이트를 통과하면 기준이 너무 느슨한 것이다)
-const THRESHOLDS = { pipeline: 0, alerts: 0, policy: 0, rollout: 0, runbook: 0 };
+const THRESHOLDS = { pipeline: 0.95, alerts: 0.85, policy: 0.95, rollout: 0.9, runbook: 1 };
 
 const root = path.resolve(__dirname, "..");
 const di = process.argv.indexOf("--dir"); const dir = di >= 0 ? process.argv[di + 1] : null;
