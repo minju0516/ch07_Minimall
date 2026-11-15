@@ -10,65 +10,80 @@
   "RB-ERR-01": {
     "title": "배포 직후 오류율 급등",
     "owner": "서비스 온콜",
-    "firstFiveMinutes": ["오류율과 요청 표본 수 확인", "최근 배포 및 설정 변경 확인"],
-    "mitigation": [{ "action": "rollback", "command": "M5에서 실행 절차 작성" }],
-    "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
-    "verify": ["오류율이 availability SLO 범위로 회복됐는지 확인"]
+    "firstFiveMinutes": ["오류율과 요청 표본 수, DB 커넥션 풀 사용률·대기 수 확인", "최근 배포의 코드 변경과 설정값 변경을 분리해 확인하고 원인 설정 변경 여부를 점검"],
+    "mitigation": [
+      { "action": "rollback", "command": "모의 배포 절차에서 원인 변경이 포함된 직전 릴리스를 안정 버전으로 롤백" },
+      { "action": "revert_config", "command": "원인이 설정값 변경으로만 확인된 경우 해당 설정만 직전 승인값으로 복원(예: DB_POOL_SIZE 20→5이면 20)" }
+    ],
+    "escalation": { "after": "미복구 5분", "to": "서비스 담당자 또는 사고 지휘자" },
+    "verify": ["오류율 ≤0.5%(availability 99.5% 이상)로 10분 유지"]
   },
   "RB-ERR-02": {
     "title": "짧은 오류 급증",
     "owner": "서비스 온콜",
     "firstFiveMinutes": ["오류율과 요청 표본 수 확인", "급증이 지속 중인지 최근 분 단위 추이 확인"],
-    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
-    "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
-    "verify": ["오류율이 평소 및 availability SLO 범위로 회복됐는지 확인"]
+    "mitigation": [{ "action": "none", "command": "지속성과 사용자 영향을 확인하기 전에는 변경하지 않고 최근 3분 추이를 관찰" }],
+    "escalation": { "after": "30분 내 안정화되지 않음", "to": "서비스 담당자" },
+    "verify": ["오류율 ≤0.5%(availability 99.5% 이상)로 10분 유지"]
   },
   "RB-ERR-03": {
     "title": "느린 오류 지속",
     "owner": "서비스 온콜",
     "firstFiveMinutes": ["최근 15분 오류율과 요청 표본 수 확인", "page 알림이 이미 발화했는지 확인"],
-    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
-    "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
-    "verify": ["오류율이 평소 및 availability SLO 범위로 회복됐는지 확인"]
+    "mitigation": [
+      { "action": "rollback", "command": "최근 배포가 원인으로 확인된 경우 모의 배포 절차에서 직전 안정 버전으로 롤백" },
+      { "action": "revert_config", "command": "설정 변경이 원인으로 확인된 경우 해당 설정만 직전 승인값으로 복원" }
+    ],
+    "escalation": { "after": "30분 내 회복되지 않음", "to": "서비스 담당자" },
+    "verify": ["오류율 ≤0.5%(availability 99.5% 이상)로 10분 유지"]
   },
   "RB-LAT-01": {
     "title": "SLO 응답 지연 초과",
     "owner": "서비스 온콜",
     "firstFiveMinutes": ["최근 8분 p95와 SLO 기준 확인", "지연이 발생한 구간과 최근 배포·설정 변경 확인"],
-    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
-    "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
-    "verify": ["p95가 SLO 800ms 이하로 회복됐는지 확인"]
+    "mitigation": [
+      { "action": "rollback", "command": "최근 변경이 원인으로 확인된 경우 모의 배포 절차에서 직전 안정 버전으로 롤백" },
+      { "action": "scale_out", "command": "용량 부족이 확인된 경우 모의 절차로 서비스 용량을 증설" }
+    ],
+    "escalation": { "after": "미복구 5분", "to": "서비스 및 인프라 온콜" },
+    "verify": ["p95 ≤800ms로 10분 유지"]
   },
   "RB-LAT-02": {
     "title": "평소 대비 응답 지연 상승",
     "owner": "서비스 온콜",
     "firstFiveMinutes": ["최근 p95와 60~120분 전 기준 중앙값 비교", "상대 상승이 지속되는지 분 단위 추이 확인"],
-    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
-    "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
-    "verify": ["p95가 오래된 기준 구간 대비 안정 범위로 회복됐는지 확인"]
+    "mitigation": [
+      { "action": "none", "command": "원인과 SLO 영향을 확인하기 전에는 변경하지 않고 분 단위 추이를 관찰" },
+      { "action": "scale_out", "command": "용량 부족이 확인된 경우에만 모의 절차로 서비스 용량을 증설" }
+    ],
+    "escalation": { "after": "30분 지속 또는 p95 SLO 초과", "to": "서비스 담당자" },
+    "verify": ["p95 ≤800ms로 10분 유지"]
   },
   "RB-TRAFFIC-01": {
     "title": "평소 대비 요청량 급감",
     "owner": "서비스 온콜",
     "firstFiveMinutes": ["실제 요청량과 시간대별 기대 요청량 비교", "감소가 지속되는지 최근 분 단위 추이 확인"],
-    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
-    "escalation": { "after": "M5에서 확정", "to": "서비스 담당자" },
-    "verify": ["요청량이 해당 시간대의 기대 범위로 회복됐는지 확인"]
+    "mitigation": [{ "action": "failover", "command": "유입 경로나 지역 장애가 확인되면 모의 절차로 정상 경로로 전환" }],
+    "escalation": { "after": "미복구 5분", "to": "인프라 및 트래픽 담당자" },
+    "verify": ["요청량이 시간대별 expectedRequests의 90% 이상으로 10분 유지"]
   },
   "RB-PAY-01": {
     "title": "결제 실패율 상승",
     "owner": "결제 서비스 온콜",
-    "firstFiveMinutes": ["paymentAttempts와 paymentFails 합계 및 실패율 확인", "같은 구간의 결제 서비스 상태와 최근 변경 확인"],
-    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
-    "escalation": { "after": "M5에서 확정", "to": "결제 서비스 담당자" },
-    "verify": ["합산 결제 실패율이 paymentFailMax SLO 이하로 회복됐는지 확인"]
+    "firstFiveMinutes": ["paymentAttempts와 paymentFails 합계·실패율 및 PG 타임아웃 추이 확인", "실패가 집중된 결제 제공자(예: PG-A)의 상태 페이지와 최근 결제 경로 변경 확인"],
+    "mitigation": [{ "action": "failover", "command": "결제 제공자 장애가 확인되면 모의 절차로 승인된 대체 제공자로 전환" }],
+    "escalation": { "after": "미복구 5분", "to": "결제 서비스 담당자 및 제공자 연락 담당자" },
+    "verify": ["결제 실패율 ≤5%(paymentFailMax)로 10분 유지하고 paymentAttempts 합계가 400건 이상인지 확인; 표본 미달이면 최대 120분까지 관찰"]
   },
   "RB-REC-01": {
     "title": "추천 품질 저하",
     "owner": "추천 서비스 담당자",
-    "firstFiveMinutes": ["최근 15분 recClicks와 recImpr 합계 및 CTR 확인", "추천 서비스의 최근 데이터·설정 변경 확인"],
-    "mitigation": [{ "action": "none", "command": "M5에서 조치 절차 작성" }],
-    "escalation": { "after": "M5에서 확정", "to": "추천 서비스 담당자" },
-    "verify": ["합산 추천 CTR이 recCtrBaseline 대비 정상 범위로 회복됐는지 확인"]
+    "firstFiveMinutes": ["최근 15분 recClicks와 recImpr 합계 및 CTR 확인", "ETL 변경과 학습 데이터 이상(예: 가격 null→0 매핑으로 zero_rate 급증)을 확인하고 운영 모델 버전·승격 시각을 저하 시작 시각과 대조; 평가 통과 로그만으로 원인을 판단하지 않음"],
+    "mitigation": [
+      { "action": "fix_data", "command": "상류 데이터 이상(예: 가격 null→0 매핑)이 확인되면 ETL 수정을 요청하고 검증 전 재학습을 보류" },
+      { "action": "rollback", "command": "저하가 최근 승격 모델과 연결되면 모의 모델 절차로 직전 안정 버전으로 복귀(예: INC-2 v12→v11)" }
+    ],
+    "escalation": { "after": "30분 내 회복되지 않음", "to": "추천 서비스 및 데이터 파이프라인 담당자" },
+    "verify": ["합산 추천 CTR ≥7%로 30분 유지하고 recImpr 합계가 1,000건 이상인지 확인 (알림 하한은 6%, recCtrBaseline은 8%)"]
   }
 }
