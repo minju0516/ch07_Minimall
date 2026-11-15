@@ -1,1 +1,38 @@
-[]
+[
+  {
+    "incident": "INC-1",
+    "rootCause": "config_change",
+    "triggeringChange": "DEP-1042",
+    "firstBadTime": "14:16",
+    "evidence": ["L0056", "L0057"],
+    "actions": ["revert_config", "add_gate"],
+    "preventions": [
+      "DB_POOL_SIZE 등 용량 관련 환경 변수를 줄이는 설정 변경은 파이프라인에서 검토 게이트를 거친다",
+      "DB 커넥션 풀 사용률·대기 수 알림을 추가한다"
+    ]
+  },
+  {
+    "incident": "INC-2",
+    "rootCause": "data_quality",
+    "triggeringChange": "ETL-318",
+    "firstBadTime": "04:15",
+    "evidence": ["L0043", "L0107"],
+    "actions": ["rollback", "fix_data_pipeline", "retrain_after_fix", "add_gate"],
+    "preventions": [
+      "학습 데이터 게이트에 결측률뿐 아니라 가격 0 비율(zero_rate) 검사를 추가한다",
+      "추천 클릭률 알림이 1시간 뒤(05:10)에야 울렸으므로 모델 교체 직후 클릭률 비교를 강화한다"
+    ]
+  },
+  {
+    "incident": "INC-3",
+    "rootCause": "external_dependency",
+    "triggeringChange": null,
+    "firstBadTime": "19:20",
+    "evidence": ["L0056", "L0064"],
+    "actions": ["failover_dependency", "add_circuit_breaker"],
+    "preventions": [
+      "결제 제공자 호출에 서킷 브레이커를 두어 타임아웃이 이어지면 즉시 대체 제공자로 우회한다",
+      "결제 제공자 상태 페이지를 런북의 처음 5분 확인 항목에 넣는다"
+    ]
+  }
+]
