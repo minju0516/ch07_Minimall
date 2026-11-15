@@ -94,3 +94,12 @@
 - 에이전트의 실수 · 미끼에 속은 부분: 없음. dirty에서 후보 적중률이 챔피언보다 높아 보였지만 학습 데이터 결측 2.47%로 거절됨. 이 결측률은 드리프트 품질 기준(5%)보다 낮아 detectDrift로는 걸리지 않는 수준이라, 승격 게이트가 마지막 방어선으로 동작함을 확인했다.
 - 사람이 확인한 범위: 세 시나리오를 직접 실행하고 출력의 수치(적중률, CI, 구간별, 결측, 지연)를 계약서 5.3 규칙과 대조.
 - 재시도 횟수: 0
+
+### [Mission 1] 작업 단위: 파이프라인 품질 게이트 구현 (`pipeline/pipeline.config.js`, OPS_DESIGN 1절)
+- 도구 · 용도: Claude — 계약서 4.2와 공개 변경 c01~c10 대조, OPS_DESIGN 1절 위험 목록 초안, Copilot 판단 표 검토 의견, 요청문 작성. GitHub Copilot(VS Code) — 판단 표 작성, 단계별 게이트 구현, 경계값·null 처리 확인.
+- 요청 요약(목표 / 맥락 / 제약 / 검증): 목표는 5단계(validate → test → model-eval → build → staging) 게이트 구현. 맥락은 계약서 4.2 게이트 규칙표와 팀이 쓴 OPS_DESIGN 1절. 제약은 `sim/`·`scripts/` 읽기·require 금지, 변경 ID 하드코딩 금지, 경계값(5%, 재시도 2회, −3.0, 70, 1.3배)의 소수점 처리 방법 명시, 필드가 없어도 예외 없이 동작(GATE_ERROR 방지), 모델 게이트는 `shouldPromote` 재사용. 검증은 `eval:pipeline` c01~c10.
+- 사람이 바꾼 것(계획 · 목록에서): 계약서에 명시되지 않은 세 가지를 팀이 학생용 자료(계약서 표현, 공개 변경 c05·c09)를 근거로 정해 OPS_DESIGN 1절에 먼저 적었다. ① "문서만 바꾼 변경" = touches가 전부 docs ② 문서 외 변경인데 빌드 결과 없음 → BUILD_FAIL ③ 커버리지 값 없음 → 비교 불가로 통과. Copilot 판단 표 승인 전에 두 가지를 추가했다. ① 모델 정보(candidate·champion)가 없으면 `shouldPromote`를 호출하지 않고 EVAL_TOO_SMALL로 차단(호출하면 예외로 GATE_ERROR가 남) ② smokeTotal ≤ 0이면 스모크를 실행하지 않은 것으로 보고 SMOKE_FAIL(문제지 도전 힌트 "측정이 없다는 것은 통과인가 차단인가").
+- 결과(점수 변화): `eval:pipeline` 41%(기준선과 같은 스타터 상태) → 10/10. 통과 c01·c05·c08·c09, 차단 c02 TEST_FAIL·c03 TEST_SKIPPED_MANY·c04 SECRET_LEAK·c06 NOT_SIGNIFICANT·c07 VULN_CRITICAL·c10 DESTRUCTIVE_MIGRATION.
+- 에이전트의 실수 · 미끼에 속은 부분: 1차 판단 표의 모델 게이트가 candidate·champion이 없을 때도 `shouldPromote`를 호출하는 설계라 예외 위험이 있었고, 표 단계에서 사람이 발견해 고쳤다.
+- 사람이 확인한 범위: 판단 표 13개 게이트를 계약서 4.2·OPS_DESIGN 1절과 한 줄씩 대조, `eval:pipeline` 결과 확인.
+- 재시도 횟수: 판단 표 수정 요청 1회, 구현 재시도 0회.
