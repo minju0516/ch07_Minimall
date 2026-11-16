@@ -12,7 +12,7 @@
 | M3 | 김윤영 | 곽민주 |
 | M4 | 곽민주 | 김윤영 |
 | M5 | 김윤영 | 곽민주 (M4와 병행: 한 명이 INC 분석을 AI에게 맡긴 사이 다른 한 명이 M4 진행) |
-| 마무리 | 곽민주: OPS_REVIEW · OPS_REPORT / 김윤영: OPS_DESIGN · POSTMORTEM · RETRO / 발표는 반반 | |
+| 마무리 | 파일별 정리: (곽민주) OPS_REVIEW · OPS_REPORT / (김윤영) OPS_DESIGN · POSTMORTEM · RETRO. 단, 문서 안의 내용은 자기가 드라이버였던 미션 부분을 직접 쓴다 / 발표는 반반 | 파일 담당자가 최종 검토 · 통합 |
 
 ## 2. 기준선 (AI 산출물, `npm run eval:ai`)
 | 영역 | 공개 점수(%) | 가장 눈에 띄는 실패 |
