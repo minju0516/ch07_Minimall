@@ -5,7 +5,7 @@ const path = require("path");
 const { runAll } = require("../sim/eval");
 const { check } = require("./check_runbook");
 
-// TODO: 기준값(0~1)을 정하고, 그 근거를 docs/OPS_REPORT.md 에 적는다.
+// 기준값과 근거: docs/OPS_REPORT.md 2절 (95/85/95/90/100% — 0점 실수는 막고 작은 부분 감점만 허용)
 //       (AI 가 만든 산출물 ai_ops/ 가 이 게이트를 통과하면 기준이 너무 느슨한 것이다)
 const THRESHOLDS = { pipeline: 0.95, alerts: 0.85, policy: 0.95, rollout: 0.9, runbook: 1 };
 
