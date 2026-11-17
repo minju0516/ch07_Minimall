@@ -147,10 +147,10 @@
 - 재시도 횟수: 0
 
 ### [마무리] 작업 단위: 제출 전 점검과 보고서 · 회고 작성 (OPS_REVIEW · OPS_REPORT · RETRO · AGENTS.md · PLAN)
-- 도구 · 용도: Claude — OPS_REVIEW(O4 · O6 · O7 · O8 점검표 · 결함 표 · 전후 비교 2줄)와 OPS_REPORT(1절 지표 변화, 3 · 4절 M1 · M3 · M5 후보, 2절 원칙 보강) 초안, AGENTS.md 규칙 7~11 후보 작성, RETRO 초안 검토 의견. GitHub Copilot(VS Code) — RETRO 판단 표와 초안 작성.
+- 도구 · 용도: Claude — Claude — OPS_REVIEW(O4 · O6 · O7 · O8 점검표 · 결함 표 · 전후 비교 2줄)와 OPS_REPORT(1절 지표 변화, 3 · 4절 M1 · M3 · M5 후보, 2절 원칙 보강) 초안, 그리고 OPS_REVIEW의 O1 · O2 · O3 · O5 점검표, 결함 표 알림 · 롤아웃 행(D-ALERT-1 · D-ALERT-2 · D-ROLL-1), 전후 비교 알림 · 점진 배포 줄, 4절 결론, OPS_REPORT 3절 한계 4 · 5번과 4절 판단 2줄 초안 작성. (나머지 기존 내용은 그대로)
 - 요청 요약(목표 / 맥락 / 제약 / 검증): 목표는 제출 전에 비어 있거나 기록과 맞지 않는 문서를 찾아 채우는 것. 맥락은 문제지 마무리 절(OPS_REVIEW 8항목 점검표 · 결함 표 · 전후 비교 · 결론, OPS_REPORT 4개 절, RETRO, AGENTS.md 규칙 반영)과 AI_USAGE_LOG. 제약은 로그 · 문서 · ai_ops 원본에 근거가 있는 내용만 쓰기, 결함은 ai_ops 파일의 줄 번호와 터지는 시나리오를 함께 적기, Copilot은 RETRO만 수정하고 AI_USAGE_LOG는 수정하지 않기. 검증은 문제지 항목별 대조와 마크다운 미리보기.
 - 사람이 바꾼 것(계획 · 목록에서): 점검 결과 OPS_REVIEW · RETRO가 비어 있고 OPS_REPORT 1 · 3 · 4절이 비어 있는 것을 확인했다. PLAN상 OPS_REVIEW · OPS_REPORT는 팀원 담당이지만, 자기가 드라이버였던 미션 부분은 직접 쓰는 것이 맞다고 판단해 M1 · M3 · M5 부분만 채우고, PLAN 마무리 줄에 "자기 미션 부분은 각자 쓰고 파일 담당자가 최종 통합"을 추가했다. AGENTS.md 규칙 후보 중 [7~11]를 팀 규칙으로 넣었다. RETRO 초안의 "아쉬운 점"이 Copilot 실수만 다뤄서, Claude의 실수(M3 PSI 0.25 초안, M5 ops-ci 첫 제안의 기준 불일치)를 추가했다.
 - 결과(점수 변화): 자동 평가 점수 변화 없음(문서 작업). 문제지 6.1 제출물 중 비어 있던 OPS_REVIEW · OPS_REPORT · RETRO를 채웠다(OPS_REVIEW의 O1 · O2 · O3 · O5와 결론은 팀원 작성 [진행 중]).
-- 에이전트의 실수 · 미끼에 속은 부분: Copilot은 RETRO 초안을 쓰기 전에 AGENTS.md 팀 규칙 1에 따라 판단 표를 먼저 보여 주고 두 사람의 승인 여부를 물었다(규칙이 실제로 작동한 사례). 다만 초안에 "초안 — 사람이 검토 · 수정할 문서" 표시를 남겼고 "아쉬운 점"에서 Claude의 실수를 빠뜨려 사람이 고쳤다.
-- 사람이 확인한 범위: Claude의 점검 결과를 읽고 고칠 항목을 직접 골라 적용, OPS_REVIEW · OPS_REPORT에 붙여 넣은 표가 깨지지 않았는지 미리보기로 확인(O6 줄의 칸 수 오류를 고침), RETRO 초안을 AI_USAGE_LOG와 대조해 수정, [팀원이 RETRO · PLAN 변경을 검토 예정].
+- 에이전트의 실수 · 미끼에 속은 부분: Copilot은 RETRO 초안을 쓰기 전에 AGENTS.md 팀 규칙 1에 따라 판단 표를 먼저 보여 주고 두 사람의 승인 여부를 물었다(규칙이 실제로 작동한 사례). 다만 초안에 "초안 — 사람이 검토 · 수정할 문서" 표시를 남겼고 "아쉬운 점"에서 Claude의 실수를 빠뜨려 사람이 고쳤다. Claude가 OPS_REVIEW에 "타임세일(A2)에서 건수 기준이 흔들릴 수 있다"고 썼으나 AI 산출물도 A2를 통과해(eval:ai) 근거가 없는 추측이었고, OPS_REPORT에 "롤백 이후 확인은 런북에 따라 한다"고 썼으나 런북에 정산 · 스키마 항목이 없어 사실과 달랐다. 사람이 Claude에게 내용이 맞는지 물어 두 곳 모두 고쳤다.
+- 사람이 확인한 범위: Claude의 점검 결과를 읽고 고칠 항목을 직접 골라 적용, OPS_REVIEW · OPS_REPORT에 붙여 넣은 표가 깨지지 않았는지 미리보기로 확인(O6 줄의 칸 수 오류를 고침), RETRO 초안을 AI_USAGE_LOG와 대조해 수정, [팀원이 RETRO · PLAN 변경을 검토 예정]. Claude가 쓴 O1 · O2 · O3 · O5와 OPS_REPORT 추가분을 읽고 맞는지 Claude에게 확인을 요청해, 지적된 부분(A2 추측 문장, 런북 문장, 임계값 설명)을 반영했다. ai_ops/alerts.js · rollout.js 해당 줄 직접 열어 확인, INC-2 metrics.csv에서 paymentAttempts 20건 미만 분 121개 직접 세어 확인.
 - 재시도 횟수: 0
