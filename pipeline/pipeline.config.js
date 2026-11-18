@@ -41,6 +41,7 @@ module.exports = {
             ? change.diff.secrets
             : [];
           const high = secrets.filter((secret) => isRecord(secret) && secret.confidence === "high");
+          // 계약서 4.2: high 신뢰도 비밀 값은 1건 이상이면 차단하고 low 오탐은 통과시킨다.
           return high.length > 0
             ? fail("SECRET_LEAK", `high 신뢰도 비밀 값 ${high.length}건 (기준 0건; low는 통과)`)
             : ok;
@@ -66,6 +67,7 @@ module.exports = {
         check: (change) => {
           const tests = change && change.tests;
           const total = isRecord(tests) ? tests.total : undefined;
+          // 계약서 4.2: src 변경에서 테스트가 1건도 없으면 차단한다.
           return hasTouch(change, "src") && !(Number.isFinite(total) && total > 0)
             ? fail("TEST_MISSING", `tests.total=${String(total)} (기준: src 변경에서 1건 이상)`)
             : ok;
@@ -76,6 +78,7 @@ module.exports = {
         check: (change) => {
           const tests = change && change.tests;
           const failed = isRecord(tests) ? tests.failed : undefined;
+          // 계약서 4.2: 실패 테스트가 1건이라도 있으면 차단한다.
           return Number.isFinite(failed) && failed > 0
             ? fail("TEST_FAIL", `tests.failed=${String(failed)} (기준 0건)`)
             : ok;
@@ -95,6 +98,7 @@ module.exports = {
           ) {
             return ok;
           }
+          // 계약서 4.2: 건너뜀 비율이 5% 초과일 때 차단하며 정확히 5%는 통과한다.
           return BigInt(skipped) * 20n > BigInt(total)
             ? fail("TEST_SKIPPED_MANY", `건너뜀 ${skipped}/${total}건 (>5% 기준; 정확히 5%는 통과)`)
             : ok;
@@ -105,6 +109,7 @@ module.exports = {
         check: (change) => {
           const tests = change && change.tests;
           const retries = isRecord(tests) ? tests.retries : undefined;
+          // 계약서 4.2: 재시도 3회 이상은 불안정 테스트로 차단한다.
           return Number.isSafeInteger(retries) && retries >= 3
             ? fail("TEST_FLAKY", `tests.retries=${String(retries)} (기준 3회 이상; 2회까지 통과)`)
             : ok;
@@ -119,6 +124,7 @@ module.exports = {
           if (isDocsOnly(change) || !Number.isFinite(coverage) || !Number.isFinite(baseline)) {
             return ok;
           }
+          // 계약서 4.2: 커버리지 하락이 3.0%p를 초과할 때만 차단한다.
           const [coverageScaled, baselineScaled, threeScaled] = scaled([coverage, baseline, 3]);
           return coverageScaled + threeScaled < baselineScaled
             ? fail(
@@ -137,6 +143,7 @@ module.exports = {
           if (!Number.isFinite(mutationScore)) {
             return fail("MUTATION_LOW", `mutationScore=${String(mutationScore)} (측정 기준 70 이상)`);
           }
+          // 계약서 4.2 비고: 정확히 70은 통과하며, 측정 안 됨(null)이면 차단한다.
           const [scoreScaled, minimumScaled] = scaled([mutationScore, 70]);
           return scoreScaled < minimumScaled
             ? fail("MUTATION_LOW", `mutationScore=${String(mutationScore)} (기준 70 이상)`)
@@ -184,6 +191,7 @@ module.exports = {
               vulnerability.scope === "runtime" &&
               vulnerability.severity === "critical",
           );
+          // 계약서 4.2: runtime critical 취약점은 1건 이상이면 차단한다(dev 전용은 제외).
           return critical.length > 0
             ? fail(
                 "VULN_CRITICAL",
@@ -199,10 +207,12 @@ module.exports = {
           const build = change && change.build;
           const size = isRecord(build) ? build.sizeMB : undefined;
           const baseline = isRecord(build) ? build.baseSizeMB : undefined;
+          // 팀 판단(입력 점검): 크기 값이 없거나 잘못되면 비교할 수 없음, 문제지 M1 힌트(입력이 null일 때도 안전하게 동작) · OPS_DESIGN 1절.
           if (!Number.isFinite(size) || !Number.isFinite(baseline) || size < 0 || baseline <= 0) {
             return ok;
           }
           const [sizeScaled, baselineScaled] = scaled([size, baseline]);
+          // 계약서 4.2 비고: 기준 크기의 1.3배 초과만 차단하므로 정확히 30% 증가는 통과한다.
           return sizeScaled * 10n > baselineScaled * 13n
             ? fail(
                 "SIZE_BLOAT",
@@ -220,6 +230,7 @@ module.exports = {
           const staging = change && change.staging;
           const passed = isRecord(staging) ? staging.smokePassed : undefined;
           const total = isRecord(staging) ? staging.smokeTotal : undefined;
+          // 계약서 4.2 SMOKE_FAIL + 팀 판단(스모크 0건은 검증으로 보지 않음) · OPS_DESIGN 1절.
           return Number.isFinite(total) && total > 0 && Number.isFinite(passed) && passed >= total
             ? ok
             : fail(

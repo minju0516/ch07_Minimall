@@ -10,16 +10,20 @@ function detectDrift(history, ctx) {
   const none = (reason) => ({ drift: false, kind: "none", reason });
   const describe = (value) => String(value);
   const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  // 계약서 5.1: weekday 값은 0~4인 평일만 유효일로 인정한다.
   const isWeekday = (value) => Number.isInteger(value) && value >= 0 && value <= 4;
   const isValidDay = (day) =>
     isRecord(day) &&
     isWeekday(day.weekday) &&
     Number.isFinite(day.volume) &&
+    // 계약서 5.2: 1,000건 미만은 통계를 믿지 않는다.
     day.volume >= 1000 &&
     Number.isFinite(day.nullRate) &&
+    // 계약서 5.2: 결측률 5% 이상은 데이터 품질 문제다.
     day.nullRate < 0.05 &&
     Array.isArray(day.priceBins) &&
     Number.isFinite(day.priceBins[0]) &&
+    // 계약서 5.2: 0원 상품 비중 20% 이상은 데이터 품질 문제다.
     day.priceBins[0] < 0.2;
   const validBins = (bins, length) =>
     Array.isArray(bins) && bins.length === length && bins.every(Number.isFinite);
@@ -35,15 +39,18 @@ function detectDrift(history, ctx) {
   if (!Number.isFinite(today.volume)) {
     return none(`오늘 volume=${describe(today.volume)} (숫자 필요)`);
   }
+  // 계약서 5.2: 1,000건 미만은 표본이 부족해 통계를 믿지 않는다.
   if (today.volume < 1000) {
     return none(`오늘 volume ${describe(today.volume)} < 1000건`);
   }
 
   const qualityViolations = [];
+  // 계약서 5.2: nullRate 5% 이상이면 데이터 품질 문제로 분류한다.
   if (Number.isFinite(today.nullRate) && today.nullRate >= 0.05) {
     qualityViolations.push(`nullRate ${describe(today.nullRate)} ≥ 0.05`);
   }
   const todayZeroPriceShare = Array.isArray(today.priceBins) ? today.priceBins[0] : undefined;
+  // 계약서 5.2: 0원 상품 비중 20% 이상이면 데이터 품질 문제로 분류한다.
   if (Number.isFinite(todayZeroPriceShare) && todayZeroPriceShare >= 0.2) {
     qualityViolations.push(`priceBins[0] ${describe(todayZeroPriceShare)} ≥ 0.20`);
   }
@@ -59,9 +66,11 @@ function detectDrift(history, ctx) {
       `오늘 품질 입력 확인 불가: nullRate=${describe(today.nullRate)}, priceBins[0]=${describe(todayZeroPriceShare)}`,
     );
   }
+  // 계약서 5.1: 요일 값은 0~6 정수만 유효(5·6 = 주말).
   if (!Number.isInteger(today.weekday) || today.weekday < 0 || today.weekday > 6) {
     return none(`오늘 weekday=${describe(today.weekday)} (0~6 정수 필요)`);
   }
+  // 계약서 5.2: 주말은 계절성이 있어 드리프트 판정에서 제외한다.
   if (today.weekday === 5 || today.weekday === 6) {
     return none(`오늘 weekday=${describe(today.weekday)}은 주말 계절성이므로 제외`);
   }
@@ -105,6 +114,7 @@ function detectDrift(history, ctx) {
   if (![previousPsi, todayPsi].every(Number.isFinite)) {
     return none(`${psiDetails} (유한한 PSI를 계산할 수 없음)`);
   }
+  // 계약서 5.2의 PSI 0.1 미만은 안정 기준; 이틀 연속 조건은 문제지 그림 6 · OPS_DESIGN 4.2/4.3(팀 판단).
   if (previousPsi >= 0.1 && todayPsi >= 0.1) {
     return {
       drift: true,
@@ -156,14 +166,17 @@ function retrainDecision(state) {
     if (daysSinceRetrain < 0) {
       return "hold";
     }
+    // 계약서 5.2: 마지막 재학습 후 7일 이내에는 잦은 재학습을 막는다.
     if (daysSinceRetrain <= 7) {
       return "hold";
     }
   }
 
+  // OPS_DESIGN 4.3(팀 추가 안전장치) · 계약서 5.2(재학습 후 기준 분포 = 최근 3일 평균) · 문제지 부록 D: 검사할 최근 3개 스냅샷이 필요하다.
   if (history.length < 3) {
     return "hold";
   }
+  // OPS_DESIGN 4.3(팀 추가 안전장치) · 계약서 5.2(재학습 후 기준 분포 = 최근 3일 평균) · 문제지 부록 D.
   for (const day of history.slice(-3)) {
     if (
       !isRecord(day) ||
@@ -174,6 +187,7 @@ function retrainDecision(state) {
     ) {
       return "hold";
     }
+    // 계약서 5.2: 최근 3일의 표본과 품질이 기준을 충족해야 오염된 데이터로 재학습하지 않는다.
     if (day.volume < 1000 || day.nullRate >= 0.05 || day.priceBins[0] >= 0.2) {
       return "hold";
     }
@@ -209,6 +223,7 @@ function shouldPromote(candidate, champion) {
   if (!Number.isFinite(size)) {
     return reject("EVAL_TOO_SMALL", `평가 데이터 크기 입력 ${format(size)} (기준 5000건 이상)`);
   }
+  // 계약서 5.3: 평가 데이터가 5,000건 미만이면 표본이 부족하다.
   if (size < 5000) {
     return reject("EVAL_TOO_SMALL", `평가 데이터 ${format(size)}건 < 5000건`);
   }
@@ -217,6 +232,7 @@ function shouldPromote(candidate, champion) {
   if (!Number.isFinite(overlap)) {
     return reject("LEAKAGE", `학습 데이터와의 겹침 입력 ${format(overlap)} (기준 0건)`);
   }
+  // 계약서 5.3: 평가 데이터와 학습 데이터는 0건 겹쳐야 누수가 없다.
   if (overlap !== 0) {
     return reject("LEAKAGE", `학습 데이터와 ${format(overlap)}건 겹침 (기준 0건)`);
   }
@@ -225,6 +241,7 @@ function shouldPromote(candidate, champion) {
   if (!Number.isFinite(nullRate)) {
     return reject("BAD_TRAIN_DATA", `학습 데이터 결측률 입력 ${format(nullRate)} (기준 0.02 이하)`);
   }
+  // 계약서 5.3: 학습 데이터 결측률은 0.02 이하여야 한다.
   const [nullRateScaled, maxNullRateScaled] = scaled([nullRate, 0.02]);
   if (nullRateScaled > maxNullRateScaled) {
     return reject("BAD_TRAIN_DATA", `학습 데이터 결측률 ${format(nullRate)} > 0.02`);
@@ -234,6 +251,7 @@ function shouldPromote(candidate, champion) {
   const ciLow = Array.isArray(ci95) ? ci95[0] : undefined;
   const ciHigh = Array.isArray(ci95) ? ci95[1] : undefined;
   const championHitRate = read(champion, ["hitRatePct"]);
+  // 계약서 5.3: 95% 신뢰구간의 하한과 상한 두 값이 있어야 비교할 수 있다.
   if (
     !Array.isArray(ci95) ||
     ci95.length < 2 ||
@@ -266,6 +284,7 @@ function shouldPromote(candidate, champion) {
     const [candidateScaled, championScaled, allowedDropScaled] = scaled([
       candidateRate,
       championRate,
+      // 계약서 5.3: 구간 적중률은 챔피언보다 2.0%p까지 낮아도 허용한다.
       2,
     ]);
     if (championScaled > candidateScaled + allowedDropScaled) {
@@ -285,6 +304,7 @@ function shouldPromote(candidate, champion) {
     );
   }
   const [latencyScaled, championLatencyScaled] = scaled([latency, championLatency]);
+  // 계약서 5.3: 후보 지연은 120ms 이하이면서 챔피언의 1.2배(5:6 비율) 이하여야 한다.
   if (latency > 120 || latencyScaled * 5n > championLatencyScaled * 6n) {
     return reject(
       "LATENCY",
