@@ -10,7 +10,7 @@ function detectDrift(history, ctx) {
   const none = (reason) => ({ drift: false, kind: "none", reason });
   const describe = (value) => String(value);
   const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-  // 계약서 5.1: weekday 값은 0~4인 평일만 유효일로 인정한다.
+  // 계약서 5.1(5·6 = 주말) · 5.2(주말 계절성은 드리프트가 아님) → 평일(0~4)만 유효일로 본다(OPS_DESIGN 4.1).
   const isWeekday = (value) => Number.isInteger(value) && value >= 0 && value <= 4;
   const isValidDay = (day) =>
     isRecord(day) &&
@@ -187,7 +187,7 @@ function retrainDecision(state) {
     ) {
       return "hold";
     }
-    // 계약서 5.2: 최근 3일의 표본과 품질이 기준을 충족해야 오염된 데이터로 재학습하지 않는다.
+    // OPS_DESIGN 4.3(팀 추가 안전장치): 최근 3일 중 표본 부족 · 품질 문제인 날이 있으면 재학습하지 않는다(기준값 1,000건 · 0.05 · 0.20은 계약서 5.2).
     if (day.volume < 1000 || day.nullRate >= 0.05 || day.priceBins[0] >= 0.2) {
       return "hold";
     }
